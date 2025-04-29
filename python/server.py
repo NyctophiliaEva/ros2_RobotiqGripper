@@ -103,7 +103,7 @@ class serviceServer(Node):
             
             SCKT.sendall(b'SET POS 255\n')
             ignore = SCKT.recv(2**10)
-            time.sleep(1.0)
+            time.sleep(5.0)
             SCKT.sendall(b'GET POS\n')
             data = SCKT.recv(2**10)
 
@@ -120,7 +120,7 @@ class serviceServer(Node):
             
             SCKT.sendall(b'SET POS 0\n')
             ignore = SCKT.recv(2**10)
-            time.sleep(1.0)
+            time.sleep(6.0)
             SCKT.sendall(b'GET POS\n')
             data = SCKT.recv(2**10)
 
@@ -133,6 +133,21 @@ class serviceServer(Node):
             response.message = "OPEN command successfully sent to Robotiq gripper. After execution, the gripper is -> " + str(AVERAGE) + "% CLOSED."
             return(response)
 
+        elif request.action == "HALF":
+            SCKT.sendall(b'SET POS 145\n')
+            ignore = SCKT.recv(2**10)
+            time.sleep(5.0)
+            SCKT.sendall(b'GET POS\n')
+            data = SCKT.recv(2**10)
+
+            GripperPos_STR = int(re.search(r'\d+', str(data)).group())
+            AVERAGE = round((float(GripperPos_STR)/255.0)*100.0, 2)
+            
+            response.success = True
+            response.value = GripperPos_STR
+            response.average = AVERAGE
+            response.message = "HALF command successfully sent to Robotiq gripper. After execution, the gripper is -> " + str(AVERAGE) + "% CLOSED."
+            return(response)
         else:
             response.message = "ERROR: Valid commands are OPEN/CLOSE. Please try again."
             return(response)
