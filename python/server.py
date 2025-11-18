@@ -52,13 +52,13 @@ class ipPARAM(Node):
         PARAM_IP = self.get_parameter('IPAddress').get_parameter_value().string_value
         
         if (PARAM_IP == "None"):
-
-            print('IPAddress ROS2 Parameter was not defined for the ros2_robotiq Service Server.')
+            self.get_logger().error('IPAddress ROS2 Parameter was not defined for the ros2_robotiq Service Server.')
             exit()
 
         else:    
-            print('IPAddress ROS2 Parameter received: ' + PARAM_IP)
-
+            self.get_logger().info('IPAddress ROS2 Parameter received: ' + PARAM_IP)
+            self.get_logger().info("ros2_RobotiqGripper_Service Server generated.")
+            
         P_CHECK_IP = True
 
 # Create NODE:
@@ -168,7 +168,6 @@ def main(args=None):
     
     # Initialise NODE:
     GripperNode = serviceServer(PARAM_IP)
-    print ("[ROS2 Robotiq Gripper]: ros2_RobotiqGripper_ServiceServer generated.")
 
     # Spin SERVICE:
     rclpy.spin(GripperNode)
