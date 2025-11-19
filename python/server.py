@@ -72,6 +72,69 @@ class serviceServer(Node):
 
         self.ip = IP
 
+        # 初始化夹爪：检查激活并设置参数
+        self.initialize_gripper()
+
+    def initialize_gripper(self):
+        # TCP-IP + SOCKET settings:
+        HOST = self.ip
+        PORT = 63352
+        
+        # SOCKET COMMUNICATION:
+        SCKT = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        SCKT.settimeout(3)  # Timeout of 3 seconds.
+
+        # OPEN socket:
+        try:
+            SCKT.connect((HOST, PORT))
+        except Exception as e:
+            self.get_logger().error(f"ERROR: Failed to connect to gripper during initialization: {str(e)}")
+            return  # 连接失败，继续但记录错误
+
+        # 检查激活状态
+        SCKT.sendall(b'GET ACT\n')
+        data_act = SCKT.recv(2**10).decode('utf-8')
+        match_act = re.search(r'ACT (\d+)', data_act)
+        if match_act and int(match_act.group(1)) != 1:
+            self.get_logger().info("Gripper not activated. Activating now.")
+            SCKT.sendall(b'SET ACT 1\n')
+            ignore = SCKT.recv(2**10)
+            time.sleep(1.0)  # 等待激活完成
+            # 验证激活
+            SCKT.sendall(b'GET ACT\n')
+            data_act = SCKT.recv(2**10).decode('utf-8')
+            match_act = re.search(r'ACT (\d+)', data_act)
+            if match_act and int(match_act.group(1)) == 1:
+                self.get_logger().info("Gripper activated successfully.")
+            else:
+                self.get_logger().error("ERROR: Failed to activate gripper.")
+
+        # 设置力阈值 (FOR = 150, 中等力)
+        SCKT.sendall(b'SET FOR 150\n')
+        ignore = SCKT.recv(2**10)
+        # 验证
+        SCKT.sendall(b'GET FOR\n')
+        data_for = SCKT.recv(2**10).decode('utf-8')
+        match_for = re.search(r'FOR (\d+)', data_for)
+        if match_for and int(match_for.group(1)) == 150:
+            self.get_logger().info("Force threshold set to 150 successfully.")
+        else:
+            self.get_logger().error("ERROR: Failed to set force threshold.")
+
+        # 设置速度阈值 (SPE = 150, 中等速度)
+        SCKT.sendall(b'SET SPE 150\n')
+        ignore = SCKT.recv(2**10)
+        # 验证
+        SCKT.sendall(b'GET SPE\n')
+        data_spe = SCKT.recv(2**10).decode('utf-8')
+        match_spe = re.search(r'SPE (\d+)', data_spe)
+        if match_spe and int(match_spe.group(1)) == 150:
+            self.get_logger().info("Speed threshold set to 150 successfully.")
+        else:
+            self.get_logger().error("ERROR: Failed to set speed threshold.")
+
+        SCKT.close()  # 关闭初始化连接
+
     def ExecuteService(self, request, response):
 
         # INITIALISE RESPONSE:
@@ -101,11 +164,20 @@ class serviceServer(Node):
 
         if request.action == "CLOSE":
             
+            # 确保激活（可选，如果已知未激活）
+            # SCKT.sendall(b'SET ACT 1\n')
+            # ignore = SCKT.recv(2**10)
+            # time.sleep(0.5)  # 等待激活
+            
             SCKT.sendall(b'SET POS 255\n')
             ignore = SCKT.recv(2**10)
+            SCKT.sendall(b'SET GTO 1\n')  # 新增：启动运动
+            ignore = SCKT.recv(2**10)
+            
+            time.sleep(0.1)  # 短暂延迟，确保命令生效
             
             # 定义阈值：电流阈值 (COU > 20 表示 >200 mA)，位置阈值 (POS < 240 表示未完全关闭)
-            CURRENT_THRESHOLD = 20  # 对应 200 mA，根据手册示例调整
+            CURRENT_THRESHOLD = 3  # 对应 30 mA，根据手册示例调整
             POSITION_THRESHOLD = 240  # 接近关闭但未满，表示可能夹物
             
             # 轮询 OBJ、COU 和 POS，直到运动完成 (OBJ != 0) 或超时
@@ -126,7 +198,7 @@ class serviceServer(Node):
                 SCKT.sendall(b'GET COU\n')
                 data_cou = SCKT.recv(2**10).decode('utf-8')
                 match_cou = re.search(r'COU (\d+)', data_cou)
-                self.get_logger().info(f"Debug: Received COU data: {data_cou.strip()}")
+                self.get_logger().info(f"Debug: Received COU data: {data_cou.strip()}, actual current (mA): {int(match_cou.group(1))*10 if match_cou else 'N/A'}")
                 if match_cou:
                     cou = int(match_cou.group(1))
                 
