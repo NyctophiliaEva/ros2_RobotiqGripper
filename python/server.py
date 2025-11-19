@@ -109,27 +109,27 @@ class serviceServer(Node):
             else:
                 self.get_logger().error("ERROR: Failed to activate gripper.")
 
-        # 设置力阈值 (FOR = 150, 中等力)
-        SCKT.sendall(b'SET FOR 150\n')
+        # 设置力阈值 (FOR = 50, small force)
+        SCKT.sendall(b'SET FOR 50\n')
         ignore = SCKT.recv(2**10)
         # 验证
         SCKT.sendall(b'GET FOR\n')
         data_for = SCKT.recv(2**10).decode('utf-8')
         match_for = re.search(r'FOR (\d+)', data_for)
-        if match_for and int(match_for.group(1)) == 150:
-            self.get_logger().info("Force threshold set to 150 successfully.")
+        if match_for and int(match_for.group(1)) == 50:
+            self.get_logger().info("Force threshold set to 50 successfully.")
         else:
             self.get_logger().error("ERROR: Failed to set force threshold.")
 
-        # 设置速度阈值 (SPE = 150, 中等速度)
-        SCKT.sendall(b'SET SPE 150\n')
+        # 设置速度阈值 (SPE = 50, safe speed)
+        SCKT.sendall(b'SET SPE 50\n')
         ignore = SCKT.recv(2**10)
         # 验证
         SCKT.sendall(b'GET SPE\n')
         data_spe = SCKT.recv(2**10).decode('utf-8')
         match_spe = re.search(r'SPE (\d+)', data_spe)
-        if match_spe and int(match_spe.group(1)) == 150:
-            self.get_logger().info("Speed threshold set to 150 successfully.")
+        if match_spe and int(match_spe.group(1)) == 50:
+            self.get_logger().info("Speed threshold set to 50 successfully.")
         else:
             self.get_logger().error("ERROR: Failed to set speed threshold.")
 
@@ -244,31 +244,84 @@ class serviceServer(Node):
             
             SCKT.sendall(b'SET POS 0\n')
             ignore = SCKT.recv(2**10)
-            time.sleep(6.0)
-            SCKT.sendall(b'GET POS\n')
-            data = SCKT.recv(2**10)
-
-            GripperPos_STR = int(re.search(r'\d+', str(data)).group())
-            AVERAGE = round((float(GripperPos_STR)/255.0)*100.0, 2)
+            SCKT.sendall(b'SET GTO 1\n')  # 优化：启动运动
+            ignore = SCKT.recv(2**10)
+            
+            time.sleep(0.1)  # 短暂延迟，确保命令生效
+            
+            # 轮询 OBJ，直到运动完成
+            start_time = time.time()
+            obj = 0
+            pos = 0
+            while time.time() - start_time < 10:
+                SCKT.sendall(b'GET OBJ\n')
+                data_obj = SCKT.recv(2**10).decode('utf-8')
+                match_obj = re.search(r'OBJ (\d+)', data_obj)
+                if match_obj:
+                    obj = int(match_obj.group(1))
+                
+                SCKT.sendall(b'GET POS\n')
+                data_pos = SCKT.recv(2**10).decode('utf-8')
+                match_pos = re.search(r'POS (\d+)', data_pos)
+                if match_pos:
+                    pos = int(match_pos.group(1))
+                
+                if obj != 0:
+                    break
+                
+                time.sleep(0.5)
+            
+            if obj == 0:
+                response.message = "ERROR: Timeout waiting for gripper motion to complete."
+                return response
+            
+            AVERAGE = 100.0 - round((float(pos) / 255.0) * 100.0, 2)
             
             response.success = True
-            response.value = GripperPos_STR
+            response.value = pos
             response.average = AVERAGE
-            response.message = "OPEN command successfully sent to Robotiq gripper. After execution, the gripper is -> " + str(AVERAGE) + "% CLOSED."
+            response.message = "OPEN command successfully sent to Robotiq gripper. After execution, the gripper is -> " + str(AVERAGE) + "% OPEN."
             return(response)
 
         elif request.action == "HALF":
+            
             SCKT.sendall(b'SET POS 145\n')
             ignore = SCKT.recv(2**10)
-            time.sleep(5.0)
-            SCKT.sendall(b'GET POS\n')
-            data = SCKT.recv(2**10)
-
-            GripperPos_STR = int(re.search(r'\d+', str(data)).group())
-            AVERAGE = round((float(GripperPos_STR)/255.0)*100.0, 2)
+            SCKT.sendall(b'SET GTO 1\n')  # 优化：启动运动
+            ignore = SCKT.recv(2**10)
+            
+            time.sleep(0.1)  # 短暂延迟，确保命令生效
+            
+            # 轮询 OBJ，直到运动完成
+            start_time = time.time()
+            obj = 0
+            pos = 0
+            while time.time() - start_time < 10:
+                SCKT.sendall(b'GET OBJ\n')
+                data_obj = SCKT.recv(2**10).decode('utf-8')
+                match_obj = re.search(r'OBJ (\d+)', data_obj)
+                if match_obj:
+                    obj = int(match_obj.group(1))
+                
+                SCKT.sendall(b'GET POS\n')
+                data_pos = SCKT.recv(2**10).decode('utf-8')
+                match_pos = re.search(r'POS (\d+)', data_pos)
+                if match_pos:
+                    pos = int(match_pos.group(1))
+                
+                if obj != 0:
+                    break
+                
+                time.sleep(0.5)
+            
+            if obj == 0:
+                response.message = "ERROR: Timeout waiting for gripper motion to complete."
+                return response
+            
+            AVERAGE = round((float(pos) / 255.0) * 100.0, 2)
             
             response.success = True
-            response.value = GripperPos_STR
+            response.value = pos
             response.average = AVERAGE
             response.message = "HALF command successfully sent to Robotiq gripper. After execution, the gripper is -> " + str(AVERAGE) + "% CLOSED."
             return(response)
