@@ -103,17 +103,69 @@ class serviceServer(Node):
             
             SCKT.sendall(b'SET POS 255\n')
             ignore = SCKT.recv(2**10)
-            time.sleep(5.0)
-            SCKT.sendall(b'GET POS\n')
-            data = SCKT.recv(2**10)
-
-            GripperPos_STR = int(re.search(r'\d+', str(data)).group())
-            AVERAGE = round((float(GripperPos_STR)/255.0)*100.0, 2)
+            
+            # 定义阈值：电流阈值 (COU > 20 表示 >200 mA)，位置阈值 (POS < 240 表示未完全关闭)
+            CURRENT_THRESHOLD = 20  # 对应 200 mA，根据手册示例调整
+            POSITION_THRESHOLD = 240  # 接近关闭但未满，表示可能夹物
+            
+            # 轮询 OBJ、COU 和 POS，直到运动完成 (OBJ != 0) 或超时
+            start_time = time.time()
+            obj = 0
+            cou = 0
+            pos = 0
+            while time.time() - start_time < 10:  # 最大超时 10 秒
+                # 获取 OBJ
+                SCKT.sendall(b'GET OBJ\n')
+                data_obj = SCKT.recv(2**10).decode('utf-8')
+                match_obj = re.search(r'OBJ (\d+)', data_obj)
+                self.get_logger().info(f"Debug: Received OBJ data: {data_obj.strip()}")
+                if match_obj:
+                    obj = int(match_obj.group(1))
+                
+                # 获取 COU (电流)
+                SCKT.sendall(b'GET COU\n')
+                data_cou = SCKT.recv(2**10).decode('utf-8')
+                match_cou = re.search(r'COU (\d+)', data_cou)
+                self.get_logger().info(f"Debug: Received COU data: {data_cou.strip()}")
+                if match_cou:
+                    cou = int(match_cou.group(1))
+                
+                # 获取 POS (位置)
+                SCKT.sendall(b'GET POS\n')
+                data_pos = SCKT.recv(2**10).decode('utf-8')
+                match_pos = re.search(r'POS (\d+)', data_pos)
+                self.get_logger().info(f"Debug: Received POS data: {data_pos.strip()}")
+                if match_pos:
+                    pos = int(match_pos.group(1))
+                
+                # 如果 OBJ != 0，运动完成，跳出循环
+                if obj != 0:
+                    self.get_logger().info("Debug: Gripper motion completed.")
+                    break
+                
+                time.sleep(0.5)
+            
+            if obj == 0:
+                response.message = "ERROR: Timeout waiting for gripper motion to complete."
+                return response
+            
+            # 计算百分比关闭
+            AVERAGE = round((float(pos) / 255.0) * 100.0, 2)
             
             response.success = True
-            response.value = GripperPos_STR
+            response.value = pos
             response.average = AVERAGE
             response.message = "CLOSE command successfully sent to Robotiq gripper. After execution, the gripper is -> " + str(AVERAGE) + "% CLOSED."
+            
+            # 结合检测结果
+            actual_current_ma = cou * 10  # 转换为 mA
+            if obj == 2 and cou > CURRENT_THRESHOLD and pos < POSITION_THRESHOLD:
+                response.message += " 接触检测：通过电流和位置验证，确认夹住了物体（电流: " + str(actual_current_ma) + " mA）。"
+            elif obj == 3 or (pos >= POSITION_THRESHOLD and cou <= CURRENT_THRESHOLD):
+                response.message += " 接触检测：无物体，夹爪手指自身接触（电流: " + str(actual_current_ma) + " mA）。"
+            else:
+                response.message += " 接触检测：不确定状态（OBJ: " + str(obj) + "，电流: " + str(actual_current_ma) + " mA，位置: " + str(pos) + "）。建议检查设置。"
+            
             return(response)
 
         elif request.action == "OPEN":
