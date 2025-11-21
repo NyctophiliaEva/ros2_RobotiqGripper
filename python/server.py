@@ -176,7 +176,7 @@ class serviceServer(Node):
             
             time.sleep(0.1)  # 短暂延迟，确保命令生效
             
-            # 定义阈值：电流阈值 (COU > 20 表示 >200 mA)，位置阈值 (POS < 240 表示未完全关闭)
+            # 定义阈值：电流阈值 (COU > 3 表示 >30 mA)，位置阈值 (POS < 240 表示未完全关闭)
             CURRENT_THRESHOLD = 3  # 对应 30 mA，根据手册示例调整
             POSITION_THRESHOLD = 240  # 接近关闭但未满，表示可能夹物
             
@@ -325,8 +325,83 @@ class serviceServer(Node):
             response.average = AVERAGE
             response.message = "HALF command successfully sent to Robotiq gripper. After execution, the gripper is -> " + str(AVERAGE) + "% CLOSED."
             return(response)
+
+        elif request.action == "CHECK_DROP":
+            # 检测物体是否脱落的操作
+            # 假设已执行 CLOSE 并检测到物体（OBJ=2），监控状态变化
+            
+            # 定义阈值：与 CLOSE 一致
+            CURRENT_THRESHOLD = 3  # 对应 30 mA，低于此表示可能负载丢失
+            
+            # 初始化变量
+            initial_obj = 0
+            initial_cou = 0
+            initial_pos = 0
+            drop_detected = False
+            
+            # 先获取初始状态
+            SCKT.sendall(b'GET OBJ\n')
+            data_obj = SCKT.recv(2**10).decode('utf-8')
+            match_obj = re.search(r'OBJ (\d+)', data_obj)
+            if match_obj:
+                initial_obj = int(match_obj.group(1))
+            
+            SCKT.sendall(b'GET COU\n')
+            data_cou = SCKT.recv(2**10).decode('utf-8')
+            match_cou = re.search(r'COU (\d+)', data_cou)
+            if match_cou:
+                initial_cou = int(match_cou.group(1))
+            
+            SCKT.sendall(b'GET POS\n')
+            data_pos = SCKT.recv(2**10).decode('utf-8')
+            match_pos = re.search(r'POS (\d+)', data_pos)
+            if match_pos:
+                initial_pos = int(match_pos.group(1))
+            
+            if initial_obj != 2:
+                response.message = "ERROR: No object detected initially. Please execute CLOSE first."
+                return response
+            
+            # 监控循环：5 秒内轮询变化
+            start_time = time.time()
+            while time.time() - start_time < 5:
+                # 获取当前状态
+                SCKT.sendall(b'GET OBJ\n')
+                data_obj = SCKT.recv(2**10).decode('utf-8')
+                match_obj = re.search(r'OBJ (\d+)', data_obj)
+                current_obj = int(match_obj.group(1)) if match_obj else 0
+                
+                SCKT.sendall(b'GET COU\n')
+                data_cou = SCKT.recv(2**10).decode('utf-8')
+                match_cou = re.search(r'COU (\d+)', data_cou)
+                current_cou = int(match_cou.group(1)) if match_cou else 0
+                
+                SCKT.sendall(b'GET POS\n')
+                data_pos = SCKT.recv(2**10).decode('utf-8')
+                match_pos = re.search(r'POS (\d+)', data_pos)
+                current_pos = int(match_pos.group(1)) if match_pos else 0
+                
+                # 检测脱落：OBJ 变化为 3，或电流降低，或位置接近全闭
+                if (current_obj == 3 and initial_obj == 2) or \
+                   (current_cou < CURRENT_THRESHOLD and initial_cou > CURRENT_THRESHOLD) or \
+                   (current_pos > initial_pos + 20):  # 位置增加 20 表示重新关闭
+                    drop_detected = True
+                    break
+                
+                time.sleep(0.5)
+            
+            response.success = True
+            response.value = initial_pos  # 返回初始位置作为参考
+            response.average = round((float(initial_pos) / 255.0) * 100.0, 2)
+            if drop_detected:
+                response.message = "CHECK_DROP: Object drop detected (OBJ: " + str(current_obj) + ", Current: " + str(current_cou * 10) + " mA, Position: " + str(current_pos) + ")."
+            else:
+                response.message = "CHECK_DROP: No object drop detected during monitoring."
+            
+            return response
+
         else:
-            response.message = "ERROR: Valid commands are OPEN/CLOSE. Please try again."
+            response.message = "ERROR: Valid commands are OPEN/CLOSE/HALF/CHECK_DROP. Please try again."
             return(response)
 
 # =================== MAIN =================== #
